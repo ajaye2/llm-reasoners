@@ -5,20 +5,32 @@ from typing import Optional, Union, Literal
 import time
 
 from .. import LanguageModel, GenerateOutput
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
 PROMPT_TEMPLATE_ANSWER = "Your response need to be ended with \"So the answer is\"\n\n"
 PROMPT_TEMPLATE_CONTINUE = "Please continue to answer the last question, following the format of previous examples. Don't say any other words.\n\n"
 
 class OpenAIModel(LanguageModel):
-    def __init__(self, model:str, max_tokens:int = 2048, temperature=0.0, additional_prompt=None):
+    def __init__(self, model:str, max_tokens:int = 2048, temperature=0.0, additional_prompt=None, use_azure=False):
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.client = OpenAI(
-            api_key = os.getenv("OPENAI_API_KEY", None),
-            # organization='',
-        )
+        if use_azure:
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+            )
+            self.client = AzureOpenAI(
+                azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", None),
+                azure_ad_token_provider=token_provider,
+                api_version = os.getenv("OPENAI_API_VERSION", None),
+                api_key = os.getenv("AZURE_OPENAI_KEY", None)
+            )
+        else:
+            self.client = OpenAI(
+                api_key = os.getenv("OPENAI_API_KEY", None),
+                # organization='',
+            )
         self.additional_prompt = additional_prompt
     
     def generate(self,
@@ -32,6 +44,7 @@ class OpenAIModel(LanguageModel):
                 temperature = None,
                 additional_prompt=None,
                 retry = 64,
+                system_prompt=None,
                 **kwargs) -> GenerateOutput:
         
         gpt_temperature = self.temperature if temperature is None else temperature
@@ -51,7 +64,9 @@ class OpenAIModel(LanguageModel):
             max_tokens = self.max_tokens
         
         if logprobs is None:
-            logprobs = 0
+            logprobs = False
+        else:
+            logprobs = True
 
 
         for i in range(1, retry + 1):
@@ -62,6 +77,8 @@ class OpenAIModel(LanguageModel):
                 ### GPT 3.5 and higher use a different API
                 if ('gpt-3.5' in self.model) or ('gpt-4' in self.model):
                     messages = [{"role": "user", "content": prompt}]
+                    if system_prompt is not None:
+                        messages = [{"role": "system", "content": system_prompt}] + messages
                     response = self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
@@ -69,11 +86,12 @@ class OpenAIModel(LanguageModel):
                         temperature=temperature,
                         top_p=top_p,
                         n=num_return_sequences,
-                        stop=stop
+                        stop=stop,
+                        logprobs=logprobs
                     )
                     return GenerateOutput(
                         text=[choice.message.content for choice in response.choices],
-                        log_prob=None
+                        log_prob=[choice.logprobs for choice in response.choices]
                     )
                 else:
                     response = self.client.chat.completions.create(
@@ -84,13 +102,14 @@ class OpenAIModel(LanguageModel):
                         top_p=top_p,
                         n=num_return_sequences,
                         stop=stop,
-                        logprobs=0,
+                        logprobs=logprobs,
                         **kwargs
                     )
                     return GenerateOutput(
                         text=[choice["text"] for choice in response.choices],
                         log_prob=[choice["logprobs"] for choice in response["choices"]]
                     )
+                # TODO: add support for logprobs
             
             except Exception as e:
                 print(f"An Error Occured: {e}, sleeping for {i} seconds")

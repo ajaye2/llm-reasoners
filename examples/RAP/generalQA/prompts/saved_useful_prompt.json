@@ -1,0 +1,1 @@
+{"input": "Given a question and some sub-questions, determine whether the last sub-question is useful to answer the question. Output 'Yes' or 'No', and a reason.", "question_prefix": "Question 1: ", "subquestion_prefix": "Question 1.{}:", "new_subquestion_prefix": "New question 1.{}:", "useful_prefix": "Is the new question useful?"}

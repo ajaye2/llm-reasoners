@@ -29,3 +29,4 @@ peft~=0.5.0
 optimum
 ninja~=1.11.1
 bitsandbytes~=0.41.1
+azure-identity
